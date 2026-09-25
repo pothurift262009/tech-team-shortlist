@@ -1,901 +1,362 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Recruitment Analytics & Shortlisting Executive Summary</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shortlist Decoder</title>
+<meta name="description" content="Can a GitHub score explain which 4 of 24 candidates got an interview invite? A reverse-engineering attempt.">
+<style>
+:root{
+  --surface-0:#f4f3ef; --surface-1:#fcfcfb; --border:#e3e1da; --grid:#ebe9e3;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#7a7975;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4;
+  --inv:#2a78d6; --notinv:#c9c7bf;
+  --good:#0a7d33; --bad:#b42318; --partial:#9a6700;
+  --good-bg:#e6f4ea; --bad-bg:#fdecea; --partial-bg:#fff4d6;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --surface-0:#111110; --surface-1:#1a1a19; --border:#2e2e2b; --grid:#2a2a27;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8f8e86;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+    --inv:#3987e5; --notinv:#4a4a46;
+    --good:#5fd08a; --bad:#ff8a80; --partial:#f0c24b;
+    --good-bg:#12301d; --bad-bg:#3a1714; --partial-bg:#342a0c;
+  }
+}
+:root[data-theme="dark"]{
+  --surface-0:#111110; --surface-1:#1a1a19; --border:#2e2e2b; --grid:#2a2a27;
+  --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#8f8e86;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+  --inv:#3987e5; --notinv:#4a4a46;
+  --good:#5fd08a; --bad:#ff8a80; --partial:#f0c24b;
+  --good-bg:#12301d; --bad-bg:#3a1714; --partial-bg:#342a0c;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--text-primary);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:30px;line-height:1.2;margin:4px 0 8px;letter-spacing:-.01em}
+h2{font-size:19px;margin:0 0 4px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);font-weight:600}
+.lede{color:var(--text-secondary);max-width:720px;margin:0}
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:20px;margin-top:20px}
+.sub{color:var(--text-secondary);font-size:14px;margin:0 0 16px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:24px}
+.kpi{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:16px}
+.kpi .v{font-size:26px;white-space:nowrap;font-weight:650;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:13px;color:var(--text-secondary)}
+.answer{border-left:4px solid var(--inv)}
+.answer p{margin:0 0 8px}
+.answer p:last-child{margin:0}
+/* rank chart */
+.rank-row{display:grid;grid-template-columns:96px 56px 1fr 52px;align-items:center;gap:8px;height:24px;position:relative}
+.rank-row .id{font-size:13px;white-space:nowrap}
+.rank-row .dg{font-size:12px;color:var(--text-muted)}
+.rank-row .track{position:relative;height:14px}
+.rank-row .bar{position:absolute;left:0;top:0;height:14px;border-radius:0 4px 4px 0;background:var(--notinv)}
+.rank-row.inv .bar{background:var(--inv)}
+.rank-row.inv .id{font-weight:650}
+.rank-row .val{font-size:13px;text-align:right;font-variant-numeric:tabular-nums;color:var(--text-secondary)}
+.rank-row:hover{background:var(--grid);border-radius:4px}
+.cut{position:absolute;top:-4px;bottom:-4px;width:0;border-left:1px solid var(--text-muted)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--text-secondary);margin:0 0 12px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+/* stacked */
+.stack-row{display:grid;grid-template-columns:96px 1fr 52px;align-items:center;gap:8px;height:28px}
+.stack{display:flex;gap:2px;height:16px}
+.stack span{display:block;height:16px}
+.stack span:last-child{border-radius:0 4px 4px 0}
+.tip{position:fixed;pointer-events:none;background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.12);display:none;z-index:9;max-width:260px}
+.tip b{font-weight:650}
+/* tests */
+.tests{display:grid;gap:12px}
+.test{display:grid;grid-template-columns:110px 1fr;gap:14px;align-items:start;padding:14px;border:1px solid var(--border);border-radius:10px}
+.badge{font-size:12px;font-weight:650;padding:4px 8px;border-radius:999px;text-align:center}
+.badge.bad{color:var(--bad);background:var(--bad-bg)}
+.badge.partial{color:var(--partial);background:var(--partial-bg)}
+.badge.good{color:var(--good);background:var(--good-bg)}
+.test h3{font-size:15px;margin:0 0 4px}
+.test p{margin:0;color:var(--text-secondary);font-size:14px}
+/* tables */
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 8px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{color:var(--text-secondary);font-weight:600;font-size:12px;cursor:pointer;user-select:none}
+tr.inv td:first-child{font-weight:650}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--notinv)}
+tr.inv .dot{background:var(--inv)}
+code{font-size:12.5px;background:var(--grid);padding:1px 5px;border-radius:4px}
+.formula td:first-child{white-space:normal}
+.foot{color:var(--text-muted);font-size:13px;margin-top:28px}
+.foot a,a{color:var(--s1)}
+.asof{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:20px}
+.asof-l{font-size:13px;color:var(--text-secondary);margin-right:4px}
+.asof button{font:inherit;font-size:13px;border:1px solid var(--border);background:var(--surface-1);color:var(--text-primary);border-radius:999px;padding:5px 12px;cursor:pointer;margin:0 6px 6px 0}
+.asof button[aria-pressed="true"]{background:var(--text-primary);color:var(--surface-1);border-color:var(--text-primary)}
+ul.sub{padding-left:20px;margin:8px 0 12px}
+ul.sub li{margin-bottom:4px}
+#tree{width:100%;min-width:640px;height:auto;display:block}
+#tree text{font-size:13px;fill:var(--text-primary)}
+#tree .small{font-size:11.5px;fill:var(--text-secondary)}
+.yes{color:var(--good);font-weight:650}.no{color:var(--text-muted)}
+.ok{color:var(--good);font-weight:650}.bad{color:var(--bad);font-weight:650}
+.model h3{font-size:15px;margin:0 0 8px}
+.formula-box{display:grid;gap:10px;margin:14px 0 18px}
+.formula-box>div{display:grid;grid-template-columns:130px auto 1fr;gap:12px;align-items:center;background:var(--surface-0);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+.formula-box .stage{font-size:12px;font-weight:650;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em}
+.formula-box code{font-size:15px;font-weight:650;padding:4px 8px;white-space:nowrap}
+.formula-box .fx{font-size:13.5px;color:var(--text-secondary)}
+.model-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.note{font-size:13.5px;color:var(--text-secondary);margin:8px 0 0}
+table.cmp td,table.cmp th{white-space:normal;text-align:left;vertical-align:top}
+table.cmp tr.best td{background:var(--good-bg)}
+#logit{width:100%;height:auto;display:block}
+#logit text{font-size:11px;fill:var(--text-muted)}
+@media (max-width:700px){.model-grid{grid-template-columns:1fr}.formula-box>div{grid-template-columns:1fr;gap:4px}}
+.toggle{float:right;font-size:12px;background:none;border:1px solid var(--border);color:var(--text-secondary);border-radius:6px;padding:4px 8px;cursor:pointer}
+@media (max-width:700px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .kpi .v{font-size:20px}
+  .rank-row{grid-template-columns:84px 48px 1fr 44px}
+  .stack-row{grid-template-columns:84px 1fr 44px}
+  .test{grid-template-columns:1fr}
+  .test .badge{justify-self:start}
+  h1{font-size:24px}
+}
+</style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
-
-    <!-- Header / Navbar -->
-    <header class="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-md">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <div class="flex items-center space-x-2">
-                    <span class="bg-indigo-600 text-white text-[10px] font-bold uppercase px-2 py-0.5 rounded tracking-wide">AI Recruitment Engine</span>
-                    <h1 class="text-xl font-bold tracking-tight text-white">Recruitment Analytics & Shortlisting Model</h1>
-                </div>
-                <p class="text-slate-400 text-xs mt-1">Automated Engineering Candidate Screening & Explainable Decision Tree Classification</p>
-            </div>
-            <div class="flex flex-wrap items-center gap-3">
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    <span class="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span>
-                    N = 24 Applicants Scored
-                </span>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
-                    GitHub REST API Pipeline
-                </span>
-            </div>
-        </div>
-    </header>
-
-    <!-- Main Container -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 flex-1">
-
-        <!-- Executive Summary Header KPI Cards -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
-                <div class="flex justify-between items-start">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total Applicant Pool</p>
-                    <span class="p-1.5 bg-slate-100 text-slate-600 rounded-lg">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                    </span>
-                </div>
-                <div class="flex items-baseline space-x-2 mt-2">
-                    <p class="text-3xl font-extrabold text-slate-900">24</p>
-                    <span class="text-xs font-medium text-slate-500">candidates</span>
-                </div>
-                <p class="text-xs text-slate-500 mt-2 flex items-center gap-1">
-                    <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500"></span> B.Tech, M.Tech & MBA tracks
-                </p>
-            </div>
-
-            <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
-                <div class="flex justify-between items-start">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Interview Cutoff Threshold</p>
-                    <span class="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
-                    </span>
-                </div>
-                <div class="flex items-baseline space-x-2 mt-2">
-                    <p class="text-3xl font-extrabold text-indigo-600">18.5</p>
-                    <span class="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">66.67th %ile</span>
-                </div>
-                <p class="text-xs text-slate-500 mt-2">Top ~33.3% advance to logic filter</p>
-            </div>
-
-            <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow">
-                <div class="flex justify-between items-start">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Shortlisted Candidates</p>
-                    <span class="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    </span>
-                </div>
-                <div class="flex items-baseline space-x-2 mt-2">
-                    <p class="text-3xl font-extrabold text-emerald-600">4</p>
-                    <span class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">16.7% Yield</span>
-                </div>
-                <p class="text-xs text-slate-500 mt-2">Final interview cohort selected</p>
-            </div>
-
-            <div class="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between">
-                <div>
-                    <div class="flex justify-between items-start">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Decision Rule Coverage</p>
-                        <span class="p-1.5 bg-purple-50 text-purple-600 rounded-lg">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        </span>
-                    </div>
-                    <div class="flex items-baseline space-x-2 mt-2">
-                        <p class="text-3xl font-extrabold text-purple-700">21/24</p>
-                        <span class="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">87.5%</span>
-                    </div>
-                    <p class="text-xs font-bold text-slate-800 mt-2">Rules explain 21/24 decisions</p>
-                </div>
-                <div class="mt-2.5 pt-2 border-t border-slate-100">
-                    <p class="text-[11px] text-slate-500 leading-snug">
-                        <span class="font-semibold text-amber-600">Note:</span> The three candidates tied at 19 with 0 PRs (C06, C07, C08) aren't separated by any rule.
-                    </p>
-                </div>
-            </div>
-        </section>
-
-        <!-- Core Decision Tree Logic & Key Findings -->
-        <section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Left: Decision Rules -->
-            <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6 flex flex-col justify-between">
-                <div>
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h2 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-                                <svg class="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
-                                Explainable Decision Tree Shortlisting Rules
-                            </h2>
-                            <p class="text-sm text-slate-500 mt-1">Extracted classification rules generated by fitting an interpretable Decision Tree Classifier (Depth = 3) on GitHub technical score and pull request contribution metrics.</p>
-                        </div>
-                        <span class="hidden sm:inline-block bg-slate-100 text-slate-700 text-xs font-mono px-2.5 py-1 rounded border border-slate-200">Entropy Criterion</span>
-                    </div>
-
-                    <!-- Rules Workflow Box -->
-                    <div class="mt-5 bg-slate-900 text-slate-100 rounded-xl p-5 font-mono text-xs sm:text-sm space-y-3.5 shadow-inner border border-slate-800">
-                        <div class="flex items-start space-x-2">
-                            <span class="text-indigo-400 font-bold shrink-0">RULE 1:</span>
-                            <span>IF <strong class="text-amber-300">GitHub Score &le; 18.5</strong> &rarr; <span class="text-rose-400 font-bold">REJECT</span> <span class="text-slate-400 block sm:inline text-xs">(Eliminates 16/24 candidates &bull; Bottom 66.7%)</span></span>
-                        </div>
-                        <div class="border-t border-slate-800 pt-3 flex items-start space-x-2">
-                            <span class="text-indigo-400 font-bold shrink-0">RULE 2:</span>
-                            <span>IF <strong class="text-amber-300">GitHub Score &gt; 18.5</strong> AND <strong class="text-amber-300">pr_merged &ge; 1</strong> &rarr; <span class="text-emerald-400 font-bold">SHORTLIST</span> <span class="text-slate-400 block sm:inline text-xs">(e.g., Es, C03)</span></span>
-                        </div>
-                        <div class="border-t border-slate-800 pt-3 flex items-start space-x-2">
-                            <span class="text-indigo-400 font-bold shrink-0">RULE 3:</span>
-                            <span>IF <strong class="text-amber-300">GitHub Score &gt; 24.5</strong> &rarr; <span class="text-emerald-400 font-bold">SHORTLIST</span> <span class="text-slate-400 block sm:inline text-xs">(e.g., C01 - Top Overall Scorer: 26)</span></span>
-                        </div>
-                        <div class="border-t border-slate-800 pt-3 flex items-start space-x-2">
-                            <span class="text-indigo-400 font-bold shrink-0">RULE 4:</span>
-                            <span>IF <strong class="text-amber-300">18.5 &lt; Score &le; 24.5</strong> AND <strong class="text-amber-300">pr_merged = 0</strong> &rarr; <span class="text-rose-400 font-bold">REJECT</span> <span class="text-slate-400 block sm:inline text-xs">(Screens out C02 & C05)</span></span>
-                        </div>
-                        <div class="border-t border-slate-800 pt-3 flex items-start space-x-2 text-slate-400 text-xs">
-                            <span class="text-amber-400 font-bold shrink-0">NOTE:</span>
-                            <span>The three candidates tied at score 19 with 0 PRs (C06, C07, C08) aren't separated by any rule (Quota sub-node required).</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Key Takeaways Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                    <div class="p-4 rounded-xl bg-indigo-50/70 border border-indigo-100 flex flex-col justify-between">
-                        <div>
-                            <div class="flex items-center space-x-2 text-indigo-900 font-bold text-xs uppercase tracking-wider">
-                                <span>Score Floor (67th %ile)</span>
-                            </div>
-                            <p class="text-xs text-indigo-950 mt-1.5 leading-relaxed">
-                                Boundary at <strong>18.5</strong> separates top-tier candidates. Profiles scoring 18 or lower are automatically filtered prior to evaluating repository depth.
-                            </p>
-                        </div>
-                    </div>
-                    <div class="p-4 rounded-xl bg-rose-50/70 border border-rose-100 flex flex-col justify-between">
-                        <div>
-                            <div class="flex items-center space-x-2 text-rose-900 font-bold text-xs uppercase tracking-wider">
-                                <span>Unmerged PR Penalty</span>
-                            </div>
-                            <p class="text-xs text-rose-950 mt-1.5 leading-relaxed">
-                                <strong>C02</strong> (Score 23) and <strong>C05</strong> (Score 21) were disqualified due to having created PRs with <strong>0 merged</strong> (0% merge rate).
-                            </p>
-                        </div>
-                    </div>
-                    <div class="p-4 rounded-xl bg-purple-50/70 border border-purple-100 flex flex-col justify-between">
-                        <div>
-                            <div class="flex items-center space-x-2 text-purple-900 font-bold text-xs uppercase tracking-wider">
-                                <span>Academic Allocation</span>
-                            </div>
-                            <p class="text-xs text-purple-950 mt-1.5 leading-relaxed">
-                                Final cohort grants representation across tracks: <strong>2 B.Tech</strong> (C03, C06), <strong>1 M.Tech</strong> (C01), and <strong>1 MBA</strong> (Es).
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right: Score Distribution Chart -->
-            <div class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between space-y-4">
-                <div>
-                    <div class="flex justify-between items-center">
-                        <h2 class="text-lg font-bold text-slate-900">Score Distribution</h2>
-                        <span class="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">Live Visualizer</span>
-                    </div>
-                    <p class="text-sm text-slate-500 mt-1">Applicant technical scores with threshold barrier (18.5) and result categories.</p>
-                </div>
-
-                <div class="h-64 relative w-full">
-                    <canvas id="scoreChart"></canvas>
-                </div>
-
-                <div class="space-y-2">
-                    <div class="flex justify-center items-center gap-4 text-xs">
-                        <span class="flex items-center gap-1.5">
-                            <span class="w-3 h-3 rounded-sm bg-emerald-500 inline-block"></span> Shortlisted (4)
-                        </span>
-                        <span class="flex items-center gap-1.5">
-                            <span class="w-3 h-3 rounded-sm bg-rose-500 inline-block"></span> Rejected Anomaly (2)
-                        </span>
-                        <span class="flex items-center gap-1.5">
-                            <span class="w-3 h-3 rounded-sm bg-slate-300 inline-block"></span> Below Threshold (18)
-                        </span>
-                    </div>
-                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 flex justify-between items-center">
-                        <span>Mean Score: <strong>12.96</strong></span>
-                        <span>Median: <strong>15.00</strong></span>
-                        <span>Cutoff: <strong class="text-indigo-600">18.50</strong></span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Interactive Decision Tree Simulator -->
-        <section class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 md:p-8 shadow-xl border border-slate-800">
-            <div class="max-w-3xl">
-                <span class="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 text-xs font-semibold rounded-full border border-indigo-400/30">Interactive Model Tester</span>
-                <h2 class="text-xl md:text-2xl font-bold mt-2">Test Candidate Against Decision Tree Classifier</h2>
-                <p class="text-slate-300 text-sm mt-1">Adjust candidate metrics below to evaluate decision path predictions in real time using the exact fitted model rules.</p>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-6 mt-6 items-center">
-                <!-- Controls -->
-                <div class="md:col-span-7 space-y-4 bg-white/5 p-5 rounded-xl border border-white/10 backdrop-blur-sm">
-                    <div>
-                        <div class="flex justify-between text-xs font-semibold mb-1 text-slate-200">
-                            <label for="simScore">GitHub Technical Score: <span id="simScoreVal" class="text-amber-400 font-bold text-sm">21</span></label>
-                            <span class="text-slate-400">Range: 0 - 30</span>
-                        </div>
-                        <input type="range" id="simScore" min="0" max="30" value="21" class="w-full accent-indigo-500 cursor-pointer">
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <div>
-                            <label for="simPrCreated" class="block text-xs font-semibold text-slate-200 mb-1">PRs Created</label>
-                            <input type="number" id="simPrCreated" min="0" max="20" value="3" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label for="simPrMerged" class="block text-xs font-semibold text-slate-200 mb-1">PRs Merged</label>
-                            <input type="number" id="simPrMerged" min="0" max="20" value="0" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500">
-                        </div>
-                    </div>
-
-                    <div>
-                        <label for="simDegree" class="block text-xs font-semibold text-slate-200 mb-1">Qualification Track</label>
-                        <select id="simDegree" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-indigo-500">
-                            <option value="B.Tech">B.Tech</option>
-                            <option value="M.Tech">M.Tech</option>
-                            <option value="MBA">MBA</option>
-                        </select>
-                    </div>
-                </div>
-
-                <!-- Simulation Output Display -->
-                <div class="md:col-span-5 bg-slate-950 p-6 rounded-xl border border-slate-800 flex flex-col justify-center items-center text-center space-y-3 min-h-[220px]">
-                    <span class="text-xs uppercase tracking-widest text-slate-400 font-semibold">Predicted Outcome</span>
-                    <div id="simBadge" class="px-4 py-2 rounded-full text-base font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                        REJECTED
-                    </div>
-                    <p id="simReason" class="text-xs text-slate-300 max-w-xs leading-relaxed">
-                        Score (21) &gt; 18.5, but candidate has 3 PRs created with 0 merged (Unmerged PR penalty rule triggered).
-                    </p>
-                    <span id="simRuleTriggered" class="text-[11px] font-mono text-indigo-400 bg-indigo-950 px-2.5 py-1 rounded border border-indigo-800">
-                        Triggered: RULE 4
-                    </span>
-                </div>
-            </div>
-        </section>
-
-                        <!-- Scoring Formula & Weights Section (Derived from githubscore.py) -->
-        <section class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-                <div>
-                    <div class="flex items-center gap-2">
-                        <span class="p-1 bg-indigo-50 text-indigo-600 rounded-lg">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                        </span>
-                        <h2 class="text-lg font-bold text-slate-900">GitHub Scoring Rubric &amp; Weight Architecture</h2>
-                    </div>
-                    <p class="text-xs text-slate-500 mt-1">Exact quantitative scoring formula implemented in <a href="https://github.com/sanand0/scripts/blob/main/githubscore.py" target="_blank" class="text-indigo-600 hover:underline font-mono">sanand0/scripts/githubscore.py</a>.</p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                        Score Range: [0, 30]
-                    </span>
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                        Mean Score: 12.96
-                    </span>
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Interview Cutoff: 18.50
-                    </span>
-                </div>
-            </div>
-
-            <!-- Mathematical Formulation Banner -->
-            <div class="bg-slate-900 text-slate-100 rounded-xl p-5 font-mono text-xs sm:text-sm border border-slate-800 space-y-3 shadow-inner">
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                    <span class="text-xs uppercase font-bold text-indigo-400 tracking-wider">Formula Definition (&lambda; = calculate_score(data))</span>
-                    <span class="text-slate-400 text-xs font-mono">round(&sum; Score Components)</span>
-                </div>
-                <div class="text-xs sm:text-sm text-slate-200 space-y-1.5 leading-relaxed overflow-x-auto custom-scrollbar">
-                    <p class="font-bold text-white"><span class="text-indigo-400">Total Score</span> = Profile (3) + Account Age (5) + Activity Breadth (23) + Code Quality Discipline (39) + Collaboration &amp; PRs (30)</p>
-                    <p class="text-slate-400 text-[11px]">&bull; Log-scale metrics: <code class="text-amber-300">log_score(x, max_val, max_pts) = max_pts &times; log10(x) / log10(max_val)</code></p>
-                    <p class="text-slate-400 text-[11px]">&bull; Quality rates on recent repos: <code class="text-amber-300">10 &times; (tests/repos) + 10 &times; (releases/repos) + 6 &times; (ci/repos) + 4 &times; (license/repos) + 3 &times; (readme/repos) + 6 &times; tags</code></p>
-                    <p class="text-slate-400 text-[11px]">&bull; PR Merge Leverage: <code class="text-emerald-400">10 &times; (pr_merged / pr_created)</code> &bull; Zero merge penalty triggers rule 4 anomaly rejection.</p>
-                </div>
-            </div>
-
-            <!-- 5 Dimension Weight Breakdown Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-                <!-- Dimension 1: Profile Completeness -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Profile</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">Max: 3 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Profile Identity</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">0.2 pts each: name, company, location, email, hireable; 1.0 pt each: bio, blog.</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 2: Account Age -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Seniority</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">Max: 5 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Account Maturity</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug"><code>min(5, max(0, years - 2))</code> rewards developers with &gt; 2 years on GitHub.</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 3: Portfolio Breadth -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Volume</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">Max: 23 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Repos &amp; Stars</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">Public repos (5 pts), recent pushed repos (8 pts), followers (4 pts), stars (6 pts).</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 4: Engineering Discipline -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Quality</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">Max: 39 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Tests, CI &amp; Release</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">Tests (10 pts), Releases (10 pts), CI/Workflows (6 pts), License (4 pts), SemVer (3 pts).</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 5: PRs & Collaboration -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Collaboration</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">Max: 30 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">PRs &amp; Merge Ratio</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">PR merge ratio (10 pts), PR created (5 pts), reviews (4 pts), issue close ratio (4 pts).</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-                <!-- Scoring Formula & Weights Section (Derived from githubscore.py) -->
-        <section class="bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-6">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-                <div>
-                    <div class="flex items-center gap-2">
-                        <span class="p-1 bg-indigo-50 text-indigo-600 rounded-lg">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
-                        </span>
-                        <h2 class="text-lg font-bold text-slate-900">GitHub Scoring Rubric &amp; Weight Architecture</h2>
-                    </div>
-                    <p class="text-xs text-slate-500 mt-1">Exact quantitative scoring formula implemented in <a href="https://github.com/sanand0/scripts/blob/main/githubscore.py" target="_blank" class="text-indigo-600 hover:underline font-mono">sanand0/scripts/githubscore.py</a>.</p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                        Score Range: [0, 30]
-                    </span>
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                        Mean Score: 12.96
-                    </span>
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        Interview Cutoff: 18.50
-                    </span>
-                </div>
-            </div>
-
-            <!-- Mathematical Formulation Banner -->
-            <div class="bg-slate-900 text-slate-100 rounded-xl p-5 font-mono text-xs sm:text-sm border border-slate-800 space-y-3 shadow-inner">
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                    <span class="text-xs uppercase font-bold text-indigo-400 tracking-wider">Formula Definition (&lambda; = calculate_score(data))</span>
-                    <span class="text-slate-400 text-xs font-mono">round(&sum; Score Components)</span>
-                </div>
-                <div class="text-xs sm:text-sm text-slate-200 space-y-1.5 leading-relaxed overflow-x-auto custom-scrollbar">
-                    <p class="font-bold text-white"><span class="text-indigo-400">Total Score</span> = Profile (3) + Account Age (5) + Activity Breadth (23) + Code Quality Discipline (39) + Collaboration &amp; PRs (30)</p>
-                    <p class="text-slate-400 text-[11px]">&bull; Log-scale metrics: <code class="text-amber-300">log_score(x, max_val, max_pts) = max_pts &times; log10(x) / log10(max_val)</code></p>
-                    <p class="text-slate-400 text-[11px]">&bull; Quality rates on recent repos: <code class="text-amber-300">10 &times; (tests/repos) + 10 &times; (releases/repos) + 6 &times; (ci/repos) + 4 &times; (license/repos) + 3 &times; (readme/repos) + 6 &times; tags</code></p>
-                    <p class="text-slate-400 text-[11px]">&bull; PR Merge Leverage: <code class="text-emerald-400">10 &times; (pr_merged / pr_created)</code> &bull; Zero merge penalty triggers rule 4 anomaly rejection.</p>
-                </div>
-            </div>
-
-            <!-- 5 Dimension Weight Breakdown Cards -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-                <!-- Dimension 1: Profile Completeness -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Profile</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-800">Max: 3 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Profile Identity</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">0.2 pts each: name, company, location, email, hireable; 1.0 pt each: bio, blog.</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 2: Account Age -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Seniority</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">Max: 5 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Account Maturity</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug"><code>min(5, max(0, years - 2))</code> rewards developers with &gt; 2 years on GitHub.</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 3: Portfolio Breadth -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Volume</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800">Max: 23 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Repos &amp; Stars</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">Public repos (5 pts), recent pushed repos (8 pts), followers (4 pts), stars (6 pts).</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 4: Engineering Discipline -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Quality</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">Max: 39 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">Tests, CI &amp; Release</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">Tests (10 pts), Releases (10 pts), CI/Workflows (6 pts), License (4 pts), SemVer (3 pts).</p>
-                    </div>
-                </div>
-
-                <!-- Dimension 5: PRs & Collaboration -->
-                <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 hover:border-indigo-300 transition flex flex-col justify-between">
-                    <div>
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Collaboration</span>
-                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">Max: 30 pts</span>
-                        </div>
-                        <p class="text-xs font-bold text-slate-800">PRs &amp; Merge Ratio</p>
-                        <p class="text-[11px] text-slate-500 mt-1 leading-snug">PR merge ratio (10 pts), PR created (5 pts), reviews (4 pts), issue close ratio (4 pts).</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Candidate Data Table -->
-        <section class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="p-6 border-b border-slate-200 space-y-4">
-                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                        <h2 class="text-lg font-bold text-slate-900">Candidate Evaluation Matrix</h2>
-                        <p class="text-sm text-slate-500 mt-0.5">Complete dataset of all 24 applicants sorted by composite GitHub score. Click any row for deep details.</p>
-                    </div>
-
-                    <!-- Search & Filter Controls -->
-                    <div class="flex flex-wrap items-center gap-3">
-                        <!-- Search Box -->
-                        <div class="relative min-w-[200px]">
-                            <svg class="w-4 h-4 absolute left-3 top-2.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                            <input type="text" id="tableSearch" placeholder="Search handle..." class="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                        </div>
-
-                        <!-- Status Filter -->
-                        <select id="statusFilter" class="py-1.5 px-3 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                            <option value="ALL">All Statuses</option>
-                            <option value="Shortlisted">Shortlisted (4)</option>
-                            <option value="Rejected">Rejected Anomaly (2)</option>
-                            <option value="Filtered">Filtered Below Cutoff (18)</option>
-                        </select>
-
-                        <!-- Degree Filter -->
-                        <select id="degreeFilter" class="py-1.5 px-3 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                            <option value="ALL">All Degrees</option>
-                            <option value="B.Tech">B.Tech</option>
-                            <option value="M.Tech">M.Tech</option>
-                            <option value="MBA">MBA</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Table Container -->
-            <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
-                <table class="w-full text-left text-xs">
-                    <thead class="bg-slate-50 text-slate-500 uppercase font-semibold border-b border-slate-200 tracking-wider sticky top-0 z-10">
-                        <tr>
-                            <th class="py-3 px-4">Rank</th>
-                            <th class="py-3 px-4">Candidate Handle</th>
-                            <th class="py-3 px-4 text-center">Score</th>
-                            <th class="py-3 px-4 text-center">Percentile</th>
-                            <th class="py-3 px-4 text-center">Degree</th>
-                            <th class="py-3 px-4 text-center">Public Repos</th>
-                            <th class="py-3 px-4 text-center">Recent Repos</th>
-                            <th class="py-3 px-4 text-center">PR Created</th>
-                            <th class="py-3 px-4 text-center">PR Merged</th>
-                            <th class="py-3 px-4 text-center">Tests</th>
-                            <th class="py-3 px-4 text-center">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody id="candidateTableBody" class="divide-y divide-slate-200 font-medium text-slate-700">
-                        <!-- Table rows populated dynamically via JS -->
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="p-4 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 flex flex-col sm:flex-row justify-between items-center gap-2">
-                <span id="showingCount">Showing 24 of 24 applicants</span>
-                <span class="text-slate-400">Cutoff threshold: <strong>18.5 points</strong></span>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- Modal for Candidate Details -->
-    <div id="candidateModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-        <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden transform transition-all">
-            <div class="p-6 bg-slate-900 text-white flex justify-between items-start">
-                <div>
-                    <span id="modalRank" class="text-xs text-indigo-400 font-mono">Rank #1</span>
-                    <h3 id="modalLogin" class="text-xl font-bold mt-0.5">CandidateHandle</h3>
-                    <p id="modalDegree" class="text-xs text-slate-400 mt-1">Degree Track: B.Tech</p>
-                </div>
-                <button id="closeModalBtn" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            
-            <div class="p-6 space-y-4 text-xs">
-                <div id="modalDataQualityAlert" class="hidden p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 font-medium flex items-start gap-2">
-                    <span class="text-amber-600 text-base">⚠️</span>
-                    <div>
-                        <strong>Data Quality Issue:</strong> Candidate records <strong>0 PRs created</strong> but <strong>1 PR merged</strong>. This indicates an external upstream contribution or untracked repository creation.
-                    </div>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span class="text-slate-500 uppercase text-[10px] font-bold">Technical Score</span>
-                        <p id="modalScore" class="text-2xl font-bold text-slate-900 mt-0.5">26</p>
-                    </div>
-                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                        <span class="text-slate-500 uppercase text-[10px] font-bold">Percentile Rank</span>
-                        <p id="modalPercentile" class="text-2xl font-bold text-indigo-600 mt-0.5">100.0%</p>
-                    </div>
-                </div>
-
-                <div class="border-t border-slate-200 pt-3">
-                    <h4 class="font-bold text-slate-900 mb-2">Metrics Breakdown</h4>
-                    <div class="grid grid-cols-2 gap-2 text-slate-600">
-                        <div class="flex justify-between py-1 border-b border-slate-100">
-                            <span>Public Repositories:</span>
-                            <strong id="modalPublicRepos" class="text-slate-900">39</strong>
-                        </div>
-                        <div class="flex justify-between py-1 border-b border-slate-100">
-                            <span>Recent Repositories:</span>
-                            <strong id="modalRecentRepos" class="text-slate-900">12</strong>
-                        </div>
-                        <div class="flex justify-between py-1 border-b border-slate-100">
-                            <span>Pull Requests Created:</span>
-                            <strong id="modalPrCreated" class="text-slate-900">0</strong>
-                        </div>
-                        <div class="flex justify-between py-1 border-b border-slate-100">
-                            <span>Pull Requests Merged:</span>
-                            <strong id="modalPrMerged" class="text-slate-900">0</strong>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-indigo-50 p-3.5 rounded-xl border border-indigo-100 space-y-1">
-                    <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-900">Decision Reason & Notes</span>
-                    <p id="modalNote" class="text-xs text-indigo-950 leading-relaxed font-medium">Detailed explanation of shortlisting decision.</p>
-                </div>
-            </div>
-
-            <div class="p-4 bg-slate-50 border-t border-slate-200 flex justify-end">
-                <button id="modalOkBtn" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition">
-                    Close Inspector
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="bg-slate-900 text-slate-400 border-t border-slate-800 py-6 mt-12">
-        <div class="max-w-7xl mx-auto px-4 text-center text-xs space-y-1">
-            <p class="font-medium text-slate-300">Recruitment Analytics & Candidate Shortlisting Model</p>
-            <p class="text-slate-500">Built for Automated Developer Screening & Explainable Machine Learning Pipelines &bull; Hosted on GitHub Pages</p>
-        </div>
-    </footer>
-
-    <!-- Main Application Script -->
-    <script>
-                        const candidates = [
-            { rank: 1, login: 'C01', score: 26, percentile: '100.0%', degree: 'M.Tech', repos: 39, recentRepos: 12, prCreated: 0, prMerged: 0, tests: 4, status: 'Shortlisted', note: 'Top overall scorer (26). Selected as M.Tech Track Leader.' },
-            { rank: 2, login: 'C02', score: 23, percentile: '95.8%', degree: 'B.Tech', repos: 17, recentRepos: 17, prCreated: 6, prMerged: 0, tests: 2, status: 'Rejected', note: 'High score (23) anomaly disqualified due to 6 PRs created with 0 merged (Unmerged PR Penalty).' },
-            { rank: 3, login: 'C03', score: 22, percentile: '91.7%', degree: 'B.Tech', repos: 20, recentRepos: 13, prCreated: 0, prMerged: 1, tests: 3, status: 'Shortlisted', dataQualityIssue: true, note: 'Verified contributor (1 merged PR). Shortlisted for B.Tech Slot 1. [Data Quality Issue: 0 PRs created with 1 merged indicates PR authored prior to query window but merged within window].' },
-            { rank: 4, login: 'Es', score: 21, percentile: '87.5%', degree: 'MBA', repos: 10, recentRepos: 7, prCreated: 1, prMerged: 1, tests: 2, status: 'Shortlisted', note: 'Verified contributor (1 merged PR). Shortlisted for MBA Track Slot 1.' },
-            { rank: 5, login: 'C05', score: 21, percentile: '87.5%', degree: 'B.Tech', repos: 14, recentRepos: 9, prCreated: 3, prMerged: 0, tests: 1, status: 'Rejected', note: 'Disqualified due to 3 created PRs with 0 merged (0% merge rate).' },
-            { rank: 6, login: 'C06', score: 19, percentile: '79.2%', degree: 'B.Tech', repos: 15, recentRepos: 6, prCreated: 0, prMerged: 0, tests: 2, status: 'Shortlisted', note: 'Score 19. Selected for B.Tech Slot 2 following disqualification of C02 & C05.' },
-            { rank: 7, login: 'C07', score: 19, percentile: '79.2%', degree: 'M.Tech', repos: 21, recentRepos: 10, prCreated: 0, prMerged: 0, tests: 1, status: 'Not Shortlisted', note: 'Score 19 above cutoff, but outranked by C01 in M.Tech track quota.' },
-            { rank: 8, login: 'C08', score: 19, percentile: '79.2%', degree: 'B.Tech', repos: 23, recentRepos: 12, prCreated: 0, prMerged: 0, tests: 2, status: 'Not Shortlisted', note: 'Score 19 above cutoff, but outranked by C03 & C06 in B.Tech track quota.' },
-            { rank: 9, login: 'C09', score: 18, percentile: '66.7%', degree: 'M.Tech', repos: 15, recentRepos: 6, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 18 &le; 18.5 Cutoff).' },
-            { rank: 10, login: 'C10', score: 18, percentile: '66.7%', degree: 'M.Tech', repos: 8, recentRepos: 7, prCreated: 2, prMerged: 0, tests: 1, status: 'Filtered', note: 'Filtered out automatically (Score 18 &le; 18.5 Cutoff).' },
-            { rank: 11, login: 'C11', score: 17, percentile: '58.3%', degree: 'B.Tech', repos: 12, recentRepos: 7, prCreated: 0, prMerged: 0, tests: 1, status: 'Filtered', note: 'Filtered out automatically (Score 17 &le; 18.5 Cutoff).' },
-            { rank: 12, login: 'C12', score: 16, percentile: '54.2%', degree: 'B.Tech', repos: 21, recentRepos: 9, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 16 &le; 18.5 Cutoff).' },
-            { rank: 13, login: 'C13', score: 14, percentile: '50.0%', degree: 'M.Tech', repos: 10, recentRepos: 5, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 14 &le; 18.5 Cutoff).' },
-            { rank: 14, login: 'C14', score: 14, percentile: '50.0%', degree: 'M.Tech', repos: 9, recentRepos: 4, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 14 &le; 18.5 Cutoff).' },
-            { rank: 15, login: 'C15', score: 14, percentile: '50.0%', degree: 'B.Tech', repos: 11, recentRepos: 6, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 14 &le; 18.5 Cutoff).' },
-            { rank: 16, login: 'C16', score: 13, percentile: '37.5%', degree: 'M.Tech', repos: 8, recentRepos: 3, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 13 &le; 18.5 Cutoff).' },
-            { rank: 17, login: 'C17', score: 5, percentile: '33.3%', degree: 'M.Tech', repos: 4, recentRepos: 2, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 5 &le; 18.5 Cutoff).' },
-            { rank: 18, login: 'C18', score: 5, percentile: '33.3%', degree: 'B.Tech', repos: 3, recentRepos: 1, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 5 &le; 18.5 Cutoff).' },
-            { rank: 19, login: 'C19', score: 4, percentile: '25.0%', degree: 'MBA', repos: 3, recentRepos: 1, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 4 &le; 18.5 Cutoff).' },
-            { rank: 20, login: 'C20', score: 2, percentile: '20.8%', degree: 'MBA', repos: 2, recentRepos: 1, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 2 &le; 18.5 Cutoff).' },
-            { rank: 21, login: 'C21', score: 1, percentile: '16.7%', degree: 'MBA', repos: 1, recentRepos: 1, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 1 &le; 18.5 Cutoff).' },
-            { rank: 22, login: 'C22', score: 0, percentile: '12.5%', degree: 'MBA', repos: 0, recentRepos: 0, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 0 &le; 18.5 Cutoff).' },
-            { rank: 23, login: 'C23', score: 0, percentile: '12.5%', degree: 'M.Tech', repos: 0, recentRepos: 0, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 0 &le; 18.5 Cutoff).' },
-            { rank: 24, login: 'C24', score: 0, percentile: '12.5%', degree: 'MBA', repos: 0, recentRepos: 0, prCreated: 0, prMerged: 0, tests: 0, status: 'Filtered', note: 'Filtered out automatically (Score 0 &le; 18.5 Cutoff).' }
-        ];
-
-        function renderTable(data) {
-            const tbody = document.getElementById('candidateTableBody');
-            tbody.innerHTML = '';
-
-            if (data.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="11" class="text-center py-8 text-slate-400">No candidates match the selected filters.</td></tr>`;
-                document.getElementById('showingCount').textContent = `Showing 0 of 24 applicants`;
-                return;
-            }
-
-            data.forEach((c) => {
-                const tr = document.createElement('tr');
-                tr.className = "hover:bg-slate-100/70 transition cursor-pointer border-b border-slate-100";
-                
-                // Highlight row backgrounds based on status
-                if (c.status === 'Shortlisted') {
-                    tr.classList.add('bg-emerald-50/40');
-                } else if (c.status === 'Rejected') {
-                    tr.classList.add('bg-rose-50/30');
-                } else if (c.score <= 18.5) {
-                    tr.classList.add('opacity-80');
-                }
-
-                let statusBadge = '';
-                if (c.status === 'Shortlisted') {
-                    statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">Shortlisted</span>`;
-                } else if (c.status === 'Rejected') {
-                    statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">Rejected (Unmerged)</span>`;
-                } else if (c.status === 'Not Shortlisted') {
-                    statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-200 text-slate-700">Quota Limit</span>`;
-                } else {
-                    statusBadge = `<span class="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500">Filtered</span>`;
-                }
-
-                let degreeBadge = '';
-                if (c.degree === 'M.Tech') degreeBadge = `<span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-bold text-[10px]">M.Tech</span>`;
-                else if (c.degree === 'MBA') degreeBadge = `<span class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 font-bold text-[10px]">MBA</span>`;
-                else degreeBadge = `<span class="px-2 py-0.5 rounded bg-slate-200 text-slate-800 font-bold text-[10px]">B.Tech</span>`;
-
-                let dqBadge = '';
-                if (c.dataQualityIssue || (c.prCreated === 0 && c.prMerged > 0)) {
-                    dqBadge = ` <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="Data Quality Issue: 0 PRs created, 1 merged">⚠️ Data Anomaly</span>`;
-                }
-
-                let dqBadge = '';
-                if (c.dataQualityIssue || (c.prCreated === 0 && c.prMerged > 0)) {
-                    dqBadge = ` <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="Data Quality Issue: 0 PRs created, 1 merged">⚠️ Data Anomaly</span>`;
-                }
-
-                let dqBadge = '';
-                if (c.dataQualityIssue || (c.prCreated === 0 && c.prMerged > 0)) {
-                    dqBadge = ` <span class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title="Data Quality Issue: 0 PRs created, 1 merged">⚠️ Data Anomaly</span>`;
-                }
-
-                tr.innerHTML = `
-                    <td class="py-3 px-4 font-mono text-slate-400">#${c.rank}</td>
-                    <td class="py-3 px-4 font-bold text-slate-900 flex items-center">${c.login}${dqBadge}</td>
-                    <td class="py-3 px-4 text-center text-sm font-extrabold ${c.score > 18.5 ? 'text-indigo-600' : 'text-slate-700'}">${c.score}</td>
-                    <td class="py-3 px-4 text-center font-mono">${c.percentile}</td>
-                    <td class="py-3 px-4 text-center">${degreeBadge}</td>
-                    <td class="py-3 px-4 text-center">${c.repos}</td>
-                    <td class="py-3 px-4 text-center">${c.recentRepos}</td>
-                    <td class="py-3 px-4 text-center font-bold ${c.prCreated > 0 && c.prMerged === 0 ? 'text-rose-600' : ''}">${c.prCreated}</td>
-                    <td class="py-3 px-4 text-center font-bold ${c.prMerged > 0 ? 'text-emerald-600' : ''}">${c.prMerged}</td>
-                    <td class="py-3 px-4 text-center">${c.tests}</td>
-                    <td class="py-3 px-4 text-center">${statusBadge}</td>
-                `;
-
-                tr.addEventListener('click', () => openCandidateModal(c));
-                tbody.appendChild(tr);
-            });
-
-            document.getElementById('showingCount').textContent = `Showing ${data.length} of 24 applicants`;
-        }
-
-        function filterCandidates() {
-            const searchVal = document.getElementById('tableSearch').value.toLowerCase().trim();
-            const statusVal = document.getElementById('statusFilter').value;
-            const degreeVal = document.getElementById('degreeFilter').value;
-
-            const filtered = candidates.filter(c => {
-                const matchesSearch = c.login.toLowerCase().includes(searchVal);
-                
-                let matchesStatus = true;
-                if (statusVal === 'Shortlisted') matchesStatus = c.status === 'Shortlisted';
-                else if (statusVal === 'Rejected') matchesStatus = c.status === 'Rejected';
-                else if (statusVal === 'Filtered') matchesStatus = c.status === 'Filtered' || c.status === 'Not Shortlisted';
-
-                let matchesDegree = true;
-                if (degreeVal !== 'ALL') matchesDegree = c.degree === degreeVal;
-
-                return matchesSearch && matchesStatus && matchesDegree;
-            });
-
-            renderTable(filtered);
-        }
-
-        document.getElementById('tableSearch').addEventListener('input', filterCandidates);
-        document.getElementById('statusFilter').addEventListener('change', filterCandidates);
-        document.getElementById('degreeFilter').addEventListener('change', filterCandidates);
-
-        function openCandidateModal(c) {
-            document.getElementById('modalRank').textContent = `Rank #${c.rank}`;
-            document.getElementById('modalLogin').textContent = c.login;
-            document.getElementById('modalDegree').textContent = `Qualification Track: ${c.degree}`;
-            document.getElementById('modalScore').textContent = c.score;
-            document.getElementById('modalPercentile').textContent = c.percentile;
-            document.getElementById('modalPublicRepos').textContent = c.repos;
-            document.getElementById('modalRecentRepos').textContent = c.recentRepos;
-            document.getElementById('modalPrCreated').textContent = c.prCreated;
-            document.getElementById('modalPrMerged').textContent = c.prMerged;
-            document.getElementById('modalNote').textContent = c.note;
-
-            const dqModalAlert = document.getElementById('modalDataQualityAlert');
-            if (dqModalAlert) {
-                if (c.dataQualityIssue || (c.prCreated === 0 && c.prMerged > 0)) {
-                    dqModalAlert.classList.remove('hidden');
-                } else {
-                    dqModalAlert.classList.add('hidden');
-                }
-            }
-
-            document.getElementById('candidateModal').classList.remove('hidden');
-        }
-
-        document.getElementById('closeModalBtn').addEventListener('click', () => {
-            document.getElementById('candidateModal').classList.add('hidden');
-        });
-        document.getElementById('modalOkBtn').addEventListener('click', () => {
-            document.getElementById('candidateModal').classList.add('hidden');
-        });
-
-        function runSimulation() {
-            const score = parseFloat(document.getElementById('simScore').value);
-            const prCreated = parseInt(document.getElementById('simPrCreated').value) || 0;
-            const prMerged = parseInt(document.getElementById('simPrMerged').value) || 0;
-            const degree = document.getElementById('simDegree').value;
-
-            document.getElementById('simScoreVal').textContent = score;
-
-            const badge = document.getElementById('simBadge');
-            const reason = document.getElementById('simReason');
-            const ruleTag = document.getElementById('simRuleTriggered');
-
-            if (score <= 18.5) {
-                badge.className = "px-4 py-2 rounded-full text-base font-bold bg-slate-700/50 text-slate-300 border border-slate-600";
-                badge.textContent = "FILTERED (REJECTED)";
-                reason.textContent = `Score (${score}) is below the 18.5 cutoff threshold (66.67th percentile). Candidate eliminated prior to repo depth inspection.`;
-                ruleTag.textContent = "Triggered: RULE 1 (Score ≤ 18.5)";
-            } else if (score > 24.5) {
-                badge.className = "px-4 py-2 rounded-full text-base font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-                badge.textContent = "SHORTLISTED";
-                reason.textContent = `Top-tier technical score (${score}) exceeds 24.5 threshold. Automatically shortlisted for final interview round.`;
-                ruleTag.textContent = "Triggered: RULE 3 (Score > 24.5)";
-            } else if (prMerged >= 1) {
-                badge.className = "px-4 py-2 rounded-full text-base font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-                badge.textContent = "SHORTLISTED";
-                reason.textContent = `Score (${score}) > 18.5 and candidate has verified open-source contributions (${prMerged} merged PRs).`;
-                ruleTag.textContent = "Triggered: RULE 2 (pr_merged ≥ 1)";
-            } else if (prCreated > 0 && prMerged === 0) {
-                badge.className = "px-4 py-2 rounded-full text-base font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30";
-                badge.textContent = "REJECTED (ANOMALY)";
-                reason.textContent = `Score (${score}) > 18.5, but candidate created ${prCreated} PRs with 0 merged (Unmerged PR Penalty triggered).`;
-                ruleTag.textContent = "Triggered: RULE 4 (Unmerged PR Penalty)";
-            } else {
-                badge.className = "px-4 py-2 rounded-full text-base font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30";
-                badge.textContent = "QUOTA EVALUATION";
-                reason.textContent = `Score (${score}) > 18.5 with clean PR history. Evaluation dependent on track quota limits for ${degree}.`;
-                ruleTag.textContent = "Triggered: Track Quota Sub-node";
-            }
-        }
-
-        document.getElementById('simScore').addEventListener('input', runSimulation);
-        document.getElementById('simPrCreated').addEventListener('input', runSimulation);
-        document.getElementById('simPrMerged').addEventListener('input', runSimulation);
-        document.getElementById('simDegree').addEventListener('change', runSimulation);
-
-        function initChart() {
-            const ctx = document.getElementById('scoreChart').getContext('2d');
-            
-            // Sort ascending for chart
-            const chartCandidates = [...candidates].sort((a, b) => a.score - b.score);
-            const labels = chartCandidates.map(c => c.login);
-            const scores = chartCandidates.map(c => c.score);
-
-            const colors = chartCandidates.map(c => {
-                if (c.status === 'Shortlisted') return '#10b981'; // Emerald
-                if (c.status === 'Rejected') return '#f43f5e'; // Rose
-                return '#cbd5e1'; // Slate gray
-            });
-
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'GitHub Composite Score',
-                        data: scores,
-                        backgroundColor: colors,
-                        borderRadius: 4,
-                        borderSkipped: false
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const candidate = chartCandidates[context.dataIndex];
-                                    return ` Score: ${candidate.score} (${candidate.status})`;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            display: false
-                        },
-                        y: {
-                            beginAtZero: true,
-                            max: 30,
-                            grid: { color: '#f1f5f9' },
-                            title: { display: true, text: 'Score', font: { size: 11, weight: '600' } }
-                        }
-                    }
-                }
-            });
-        }
-
-        // Initialize application on window load
-        window.addEventListener('load', () => {
-            renderTable(candidates);
-            runSimulation();
-            initChart();
-        });
-    </script>
+<body>
+<div class="wrap">
+  <button class="toggle" id="themeBtn" type="button">Toggle theme</button>
+  <div class="eyebrow">Reverse-engineering exercise · by Eswar</div>
+  <h1>Shortlist Decoder: how 4 of 24 got the interview</h1>
+  <p class="lede">I re-ran the data collection from <a href="https://github.com/sanand0/scripts/blob/main/githubscore.py">githubscore.py</a> for all 24 candidates and rebuilt every score <b>as of a past date</b>, before any work done after the shortlist could count. Then I built a decision tree that explains every one of the 24 invite decisions. Candidate IDs are anonymised by score rank. The tree is my model of the process, not a confirmed rule.</p>
+
+  <div class="asof" role="group" aria-label="Score as of date"><span class="asof-l">Score as of</span><span id="dateBtns"></span></div>
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="kAcc"></div><div class="l">decisions the tree explains</div></div>
+    <div class="kpi"><div class="v">3</div><div class="l">questions in the tree</div></div>
+    <div class="kpi"><div class="v" id="kGate"></div><div class="l">pass the score screen</div></div>
+    <div class="kpi"><div class="v" id="kRanks"></div><div class="l">score ranks of the 4 invited</div></div>
+  </div>
+
+  <div class="card answer">
+    <h2>The answer: a 3-question decision tree explains all 24 decisions</h2>
+    <p><b>1. Is the GitHub score at least 18.5?</b> (in practice, a rounded score of 19 or more) If not, no invite. This removes 16 of 24.</p>
+    <p><b>2. Has at least one of your recent repos been starred by someone?</b> If yes, invite.</p>
+    <p><b>3. If not, have you put a licence on at least 3 recent repos?</b> If yes, invite. If not, no invite.</p>
+    <p>In plain words: <b>clear the score bar, then show one sign your work is ready for others</b>. That sign is either someone valued it enough to star it, or you published it properly with a licence. The top scorer who was left out (C02, 24.09) has neither.</p>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Decision tree · applied to scores as of the selected date</div>
+    <h2>How each of the 24 falls through the tree</h2>
+    <p class="sub" id="treeSub"></p>
+    <div class="tbl-wrap"><svg id="tree" viewBox="0 0 900 360" role="img" aria-label="Decision tree"></svg></div>
+    <h3 style="font-size:15px;margin:18px 0 8px">The 8 who passed the score screen</h3>
+    <div class="tbl-wrap"><table class="cmp" id="trace"><thead><tr><th>Candidate</th><th>Degree</th><th>Score</th><th>Stars</th><th>Licensed repos</th><th>Path through the tree</th><th>Tree says</th><th>Actual</th></tr></thead><tbody></tbody></table></div>
+    <p class="note" style="margin-top:12px">The tree gives the same 24/24 result on every date from 25 Aug to 8 Sep, so it isn't an artefact of one day's data. It was fitted to these 24 people, so the real test is whether it predicts the next shortlist.</p>
+  </div>
+  <div class="card">
+    <h2>Exact scores, all 24 candidates</h2>
+    <p class="sub" id="rankSub"></p>
+    <div class="legend"><span><i style="background:var(--inv)"></i>Invited</span><span><i style="background:var(--notinv)"></i>Not invited</span></div>
+    <div id="rankChart"></div>
+  </div>
+
+  <div class="card">
+    <h2>Where the points come from (top 10)</h2>
+    <p class="sub">The same score split into the five parts of the formula. Almost half of C02's score comes from repo quality (tests and CI), yet C02 wasn't invited.</p>
+    <div class="legend" id="stackLegend"></div>
+    <div id="stackChart"></div>
+  </div>
+
+  <div class="card">
+    <h2>How the score is built</h2>
+    <p class="sub">From <code>githubscore.py</code>. Maximum is about 100. "Recent" means repos pushed in the last 18 months (up to 20). Quality items are the share of recent repos that have them.</p>
+    <div class="tbl-wrap"><table class="formula">
+      <thead><tr><th>Part</th><th>What counts</th><th>Max points</th></tr></thead>
+      <tbody>
+        <tr><td>Profile</td><td>name, company, location, email, hireable (0.2 each); bio, blog (1 each)</td><td>2</td></tr>
+        <tr><td>Account age</td><td>years since account creation, minus 2</td><td>5</td></tr>
+        <tr><td>Reach</td><td>followers (log scale to 1,000); public repos (log scale to 100)</td><td>4 + 5</td></tr>
+        <tr><td>Recent activity</td><td>recent repos (1 point each); stars on them (log scale to 1,000)</td><td>8 + 6</td></tr>
+        <tr><td>Repo quality</td><td>tests 10, releases 10, CI 6, licence 4, README 3, tags 3, semver 3</td><td>39</td></tr>
+        <tr><td>Collaboration</td><td>PRs to others' repos 5, PR merge ratio 10, issues 3, issue close ratio 4, reviews 4, repos reviewed 4</td><td>30</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Full data</h2>
+    <p class="sub">Values as of the selected date. Click a column header to sort. "Trend" is the exact score on 25 Aug → 29 Aug → 1 Sep → 4 Sep → 8 Sep.</p>
+    <div class="tbl-wrap"><table id="tbl">
+      <thead><tr>
+        <th data-k="id">Candidate</th><th data-k="deg">Degree</th><th data-k="raw">Score</th><th data-k="rank">Rank</th>
+        <th data-k="recent">Recent repos</th><th data-k="tests">w/ tests</th><th data-k="ci">w/ CI</th><th data-k="lic">w/ licence</th>
+        <th data-k="stars">Stars</th><th data-k="fol">Followers</th><th data-k="pr">PRs</th><th data-k="prm">Merged</th><th>Trend</th>
+      </tr></thead><tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Method and caveats</h2>
+    <p class="sub" style="margin:0">
+      <b>How the as-of date works.</b> Data was pulled from the GitHub API on 25 Sep 2026, using the collection code from <code>githubscore.py</code>. For each date, I rebuilt what the script would have seen on that day:
+    </p>
+    <ul class="sub">
+      <li>Repos created after the date are dropped, and the 18-month window and account age are counted back from the date.</li>
+      <li>Each repo is read at its last commit on or before the date. This decides whether it had tests, a README or a licence at that point.</li>
+      <li>Repos untouched since the date use the same GitHub API checks as the script.</li>
+      <li>CI, tags, releases, PRs, issues and reviews count only if they were created by the date.</li>
+      <li>Followers and stars can only be seen as they are today, so the tree uses today's star counts. The starred repos all existed by 8 Sep, but GitHub didn't let me read when each star was added.</li>
+      <li>As a check, rebuilding "today" this way lands within about half a point of the script's own result for every candidate.</li>
+    </ul>
+    <p class="sub" style="margin:0">
+      The last date is 8 Sep 2026, before the shortlist. Across 25 Aug – 8 Sep the ranking of the top 8 never changes, so the conclusions don't hinge on the exact day.
+      <br><br>
+      <b>Change from my first version:</b> it had an "unmerged PR penalty" rule. The rebuilt data shows no one in the top 9 had any PR to someone else's repo by 8 Sep, so the tree replaces that rule with stars and licences.
+    </p>
+  </div>
+  <p class="foot">Personal analysis · candidate IDs anonymised (C01–C24 by score rank) · rules are inferred, not confirmed. If I got something wrong, I'd like to know what I missed.</p>
+</div>
+<div class="tip" id="tip"></div>
+<script>
+const D = {"dates": ["2026-08-25", "2026-08-29", "2026-09-01", "2026-09-04", "2026-09-08"], "groups": ["Profile & account age", "Reach (followers, repos)", "Recent activity (repos, stars)", "Repo quality (tests, CI, licence\u2026)", "Collaboration (PRs, issues, reviews)"], "cands": [{"id": "C01", "deg": "M.Tech", "inv": true, "by": {"2026-08-25": {"raw": 26.167, "g": [4.616, 4.586, 8.602, 4.364, 4.0], "recent": 11, "pub": 38, "tests": 3, "ci": 0, "lic": 0, "readme": 6, "stars": 2, "fol": 3, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 26.178, "g": [4.627, 4.586, 8.602, 4.364, 4.0], "recent": 11, "pub": 38, "tests": 3, "ci": 0, "lic": 0, "readme": 6, "stars": 2, "fol": 3, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 26.186, "g": [4.635, 4.586, 8.602, 4.364, 4.0], "recent": 11, "pub": 38, "tests": 3, "ci": 0, "lic": 0, "readme": 6, "stars": 2, "fol": 3, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 26.194, "g": [4.643, 4.586, 8.602, 4.364, 4.0], "recent": 11, "pub": 38, "tests": 3, "ci": 0, "lic": 0, "readme": 6, "stars": 2, "fol": 3, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 26.205, "g": [4.654, 4.586, 8.602, 4.364, 4.0], "recent": 11, "pub": 38, "tests": 3, "ci": 0, "lic": 0, "readme": 6, "stars": 2, "fol": 3, "pr": 0, "prm": 0}}}, {"id": "C02", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 24.093, "g": [2.0, 2.785, 8, 11.308, 0], "recent": 13, "pub": 13, "tests": 7, "ci": 5, "lic": 2, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 24.093, "g": [2.0, 2.785, 8, 11.308, 0], "recent": 13, "pub": 13, "tests": 7, "ci": 5, "lic": 2, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 24.093, "g": [2.0, 2.785, 8, 11.308, 0], "recent": 13, "pub": 13, "tests": 7, "ci": 5, "lic": 2, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 24.093, "g": [2.0, 2.785, 8, 11.308, 0], "recent": 13, "pub": 13, "tests": 7, "ci": 5, "lic": 2, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 24.093, "g": [2.0, 2.785, 8, 11.308, 0], "recent": 13, "pub": 13, "tests": 7, "ci": 5, "lic": 2, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C03", "deg": "B.Tech", "inv": true, "by": {"2026-08-25": {"raw": 23.109, "g": [1.984, 3.197, 8, 9.929, 0], "recent": 14, "pub": 19, "tests": 8, "ci": 0, "lic": 5, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 23.12, "g": [1.995, 3.197, 8, 9.929, 0], "recent": 14, "pub": 19, "tests": 8, "ci": 0, "lic": 5, "readme": 13, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 23.354, "g": [2.003, 3.197, 8, 10.154, 0], "recent": 13, "pub": 19, "tests": 8, "ci": 0, "lic": 4, "readme": 12, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 23.362, "g": [2.011, 3.197, 8, 10.154, 0], "recent": 13, "pub": 19, "tests": 8, "ci": 0, "lic": 4, "readme": 12, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 23.373, "g": [2.022, 3.197, 8, 10.154, 0], "recent": 13, "pub": 19, "tests": 8, "ci": 0, "lic": 4, "readme": 12, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C04", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 21.31, "g": [3.333, 2.865, 8, 7.111, 0], "recent": 9, "pub": 14, "tests": 2, "ci": 3, "lic": 2, "readme": 6, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 21.321, "g": [3.344, 2.865, 8, 7.111, 0], "recent": 9, "pub": 14, "tests": 2, "ci": 3, "lic": 2, "readme": 6, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 21.329, "g": [3.353, 2.865, 8, 7.111, 0], "recent": 9, "pub": 14, "tests": 2, "ci": 3, "lic": 2, "readme": 6, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 21.337, "g": [3.361, 2.865, 8, 7.111, 0], "recent": 9, "pub": 14, "tests": 2, "ci": 3, "lic": 2, "readme": 6, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 21.348, "g": [3.372, 2.865, 8, 7.111, 0], "recent": 9, "pub": 14, "tests": 2, "ci": 3, "lic": 2, "readme": 6, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "Eswar (me)", "deg": "MBA", "inv": true, "by": {"2026-08-25": {"raw": 20.324, "g": [6.4, 2.258, 6.0, 5.667, 0], "recent": 6, "pub": 8, "tests": 1, "ci": 1, "lic": 0, "readme": 6, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 20.324, "g": [6.4, 2.258, 6.0, 5.667, 0], "recent": 6, "pub": 8, "tests": 1, "ci": 1, "lic": 0, "readme": 6, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 20.324, "g": [6.4, 2.258, 6.0, 5.667, 0], "recent": 6, "pub": 8, "tests": 1, "ci": 1, "lic": 0, "readme": 6, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 20.324, "g": [6.4, 2.258, 6.0, 5.667, 0], "recent": 6, "pub": 8, "tests": 1, "ci": 1, "lic": 0, "readme": 6, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 21.071, "g": [6.4, 2.386, 7.0, 5.286, 0], "recent": 7, "pub": 9, "tests": 1, "ci": 1, "lic": 0, "readme": 7, "stars": 1, "fol": 1, "pr": 0, "prm": 0}}}, {"id": "C06", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 19.348, "g": [3.942, 3.306, 8, 4.1, 0], "recent": 10, "pub": 21, "tests": 2, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 19.359, "g": [3.953, 3.306, 8, 4.1, 0], "recent": 10, "pub": 21, "tests": 2, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 19.367, "g": [3.961, 3.306, 8, 4.1, 0], "recent": 10, "pub": 21, "tests": 2, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 19.375, "g": [3.969, 3.306, 8, 4.1, 0], "recent": 10, "pub": 21, "tests": 2, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 19.386, "g": [3.98, 3.306, 8, 4.1, 0], "recent": 10, "pub": 21, "tests": 2, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C07", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 18.95, "g": [1.477, 3.806, 8, 5.667, 0], "recent": 12, "pub": 23, "tests": 3, "ci": 0, "lic": 2, "readme": 10, "stars": 0, "fol": 2, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 18.961, "g": [1.488, 3.806, 8, 5.667, 0], "recent": 12, "pub": 23, "tests": 3, "ci": 0, "lic": 2, "readme": 10, "stars": 0, "fol": 2, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 18.969, "g": [1.496, 3.806, 8, 5.667, 0], "recent": 12, "pub": 23, "tests": 3, "ci": 0, "lic": 2, "readme": 10, "stars": 0, "fol": 2, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 18.977, "g": [1.505, 3.806, 8, 5.667, 0], "recent": 12, "pub": 23, "tests": 3, "ci": 0, "lic": 2, "readme": 10, "stars": 0, "fol": 2, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 18.988, "g": [1.516, 3.806, 8, 5.667, 0], "recent": 12, "pub": 23, "tests": 3, "ci": 0, "lic": 2, "readme": 10, "stars": 0, "fol": 2, "pr": 0, "prm": 0}}}, {"id": "C08", "deg": "B.Tech", "inv": true, "by": {"2026-08-25": {"raw": 18.746, "g": [1.973, 2.94, 6.0, 7.833, 0], "recent": 6, "pub": 15, "tests": 2, "ci": 0, "lic": 3, "readme": 5, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 18.757, "g": [1.984, 2.94, 6.0, 7.833, 0], "recent": 6, "pub": 15, "tests": 2, "ci": 0, "lic": 3, "readme": 5, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 18.765, "g": [1.992, 2.94, 6.0, 7.833, 0], "recent": 6, "pub": 15, "tests": 2, "ci": 0, "lic": 3, "readme": 5, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 18.774, "g": [2.0, 2.94, 6.0, 7.833, 0], "recent": 6, "pub": 15, "tests": 2, "ci": 0, "lic": 3, "readme": 5, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 18.785, "g": [2.011, 2.94, 6.0, 7.833, 0], "recent": 6, "pub": 15, "tests": 2, "ci": 0, "lic": 3, "readme": 5, "stars": 1, "fol": 1, "pr": 0, "prm": 0}}}, {"id": "C09", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 17.965, "g": [5.016, 2.865, 8, 2.083, 0], "recent": 12, "pub": 14, "tests": 1, "ci": 0, "lic": 0, "readme": 5, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 17.976, "g": [5.027, 2.865, 8, 2.083, 0], "recent": 12, "pub": 14, "tests": 1, "ci": 0, "lic": 0, "readme": 5, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 17.984, "g": [5.035, 2.865, 8, 2.083, 0], "recent": 12, "pub": 14, "tests": 1, "ci": 0, "lic": 0, "readme": 5, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 17.992, "g": [5.044, 2.865, 8, 2.083, 0], "recent": 12, "pub": 14, "tests": 1, "ci": 0, "lic": 0, "readme": 5, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 18.003, "g": [5.054, 2.865, 8, 2.083, 0], "recent": 12, "pub": 14, "tests": 1, "ci": 0, "lic": 0, "readme": 5, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C10", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 17.248, "g": [0.2, 2.113, 6.602, 8.333, 0], "recent": 6, "pub": 7, "tests": 2, "ci": 2, "lic": 0, "readme": 4, "stars": 2, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 17.248, "g": [0.2, 2.113, 6.602, 8.333, 0], "recent": 6, "pub": 7, "tests": 2, "ci": 2, "lic": 0, "readme": 4, "stars": 2, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 17.248, "g": [0.2, 2.113, 6.602, 8.333, 0], "recent": 6, "pub": 7, "tests": 2, "ci": 2, "lic": 0, "readme": 4, "stars": 2, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 17.248, "g": [0.2, 2.113, 6.602, 8.333, 0], "recent": 6, "pub": 7, "tests": 2, "ci": 2, "lic": 0, "readme": 4, "stars": 2, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 17.248, "g": [0.2, 2.113, 6.602, 8.333, 0], "recent": 6, "pub": 7, "tests": 2, "ci": 2, "lic": 0, "readme": 4, "stars": 2, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C11", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 17.025, "g": [1.694, 2.698, 8.204, 4.429, 0], "recent": 7, "pub": 12, "tests": 1, "ci": 0, "lic": 0, "readme": 7, "stars": 4, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 17.036, "g": [1.705, 2.698, 8.204, 4.429, 0], "recent": 7, "pub": 12, "tests": 1, "ci": 0, "lic": 0, "readme": 7, "stars": 4, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 17.044, "g": [1.713, 2.698, 8.204, 4.429, 0], "recent": 7, "pub": 12, "tests": 1, "ci": 0, "lic": 0, "readme": 7, "stars": 4, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 17.052, "g": [1.722, 2.698, 8.204, 4.429, 0], "recent": 7, "pub": 12, "tests": 1, "ci": 0, "lic": 0, "readme": 7, "stars": 4, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 17.063, "g": [1.733, 2.698, 8.204, 4.429, 0], "recent": 7, "pub": 12, "tests": 1, "ci": 0, "lic": 0, "readme": 7, "stars": 4, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C12", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 15.536, "g": [1.786, 3.306, 8.0, 2.444, 0], "recent": 9, "pub": 21, "tests": 1, "ci": 0, "lic": 0, "readme": 4, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 15.547, "g": [1.797, 3.306, 8.0, 2.444, 0], "recent": 9, "pub": 21, "tests": 1, "ci": 0, "lic": 0, "readme": 4, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 15.556, "g": [1.806, 3.306, 8.0, 2.444, 0], "recent": 9, "pub": 21, "tests": 1, "ci": 0, "lic": 0, "readme": 4, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 15.564, "g": [1.814, 3.306, 8.0, 2.444, 0], "recent": 9, "pub": 21, "tests": 1, "ci": 0, "lic": 0, "readme": 4, "stars": 1, "fol": 1, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 15.575, "g": [1.825, 3.306, 8.0, 2.444, 0], "recent": 9, "pub": 21, "tests": 1, "ci": 0, "lic": 0, "readme": 4, "stars": 1, "fol": 1, "pr": 0, "prm": 0}}}, {"id": "C13", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 14.312, "g": [1.926, 2.386, 7, 3.0, 0], "recent": 7, "pub": 9, "tests": 0, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 14.323, "g": [1.937, 2.386, 7, 3.0, 0], "recent": 7, "pub": 9, "tests": 0, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 14.331, "g": [1.945, 2.386, 7, 3.0, 0], "recent": 7, "pub": 9, "tests": 0, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 14.339, "g": [1.954, 2.386, 7, 3.0, 0], "recent": 7, "pub": 9, "tests": 0, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 14.35, "g": [1.965, 2.386, 7, 3.0, 0], "recent": 7, "pub": 9, "tests": 0, "ci": 0, "lic": 0, "readme": 7, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C14", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 14.124, "g": [0.409, 2.603, 8, 3.111, 0], "recent": 9, "pub": 11, "tests": 1, "ci": 0, "lic": 0, "readme": 6, "stars": 0, "fol": 1, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 14.135, "g": [0.42, 2.603, 8, 3.111, 0], "recent": 9, "pub": 11, "tests": 1, "ci": 0, "lic": 0, "readme": 6, "stars": 0, "fol": 1, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 14.143, "g": [0.429, 2.603, 8, 3.111, 0], "recent": 9, "pub": 11, "tests": 1, "ci": 0, "lic": 0, "readme": 6, "stars": 0, "fol": 1, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 14.151, "g": [0.437, 2.603, 8, 3.111, 0], "recent": 9, "pub": 11, "tests": 1, "ci": 0, "lic": 0, "readme": 6, "stars": 0, "fol": 1, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 14.162, "g": [0.448, 2.603, 8, 3.111, 0], "recent": 9, "pub": 11, "tests": 1, "ci": 0, "lic": 0, "readme": 6, "stars": 0, "fol": 1, "pr": 0, "prm": 0}}}, {"id": "C15", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 13.502, "g": [0.081, 2.603, 8, 2.818, 0], "recent": 11, "pub": 11, "tests": 0, "ci": 0, "lic": 1, "readme": 9, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 13.513, "g": [0.092, 2.603, 8, 2.818, 0], "recent": 11, "pub": 11, "tests": 0, "ci": 0, "lic": 1, "readme": 9, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 13.522, "g": [0.1, 2.603, 8, 2.818, 0], "recent": 11, "pub": 11, "tests": 0, "ci": 0, "lic": 1, "readme": 9, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 13.53, "g": [0.108, 2.603, 8, 2.818, 0], "recent": 11, "pub": 11, "tests": 0, "ci": 0, "lic": 1, "readme": 9, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 13.541, "g": [0.119, 2.603, 8, 2.818, 0], "recent": 11, "pub": 11, "tests": 0, "ci": 0, "lic": 1, "readme": 9, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C16", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 13.402, "g": [1.644, 2.258, 8, 1.5, 0], "recent": 8, "pub": 8, "tests": 0, "ci": 0, "lic": 0, "readme": 4, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 13.413, "g": [1.655, 2.258, 8, 1.5, 0], "recent": 8, "pub": 8, "tests": 0, "ci": 0, "lic": 0, "readme": 4, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 13.421, "g": [1.663, 2.258, 8, 1.5, 0], "recent": 8, "pub": 8, "tests": 0, "ci": 0, "lic": 0, "readme": 4, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 13.429, "g": [1.671, 2.258, 8, 1.5, 0], "recent": 8, "pub": 8, "tests": 0, "ci": 0, "lic": 0, "readme": 4, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 13.44, "g": [1.682, 2.258, 8, 1.5, 0], "recent": 8, "pub": 8, "tests": 0, "ci": 0, "lic": 0, "readme": 4, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C17", "deg": "B.Tech", "inv": false, "by": {"2026-08-25": {"raw": 5.212, "g": [1.212, 0.0, 1, 3.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 5.223, "g": [1.223, 0.0, 1, 3.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 5.231, "g": [1.231, 0.0, 1, 3.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 5.239, "g": [1.239, 0.0, 1, 3.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 5.25, "g": [1.25, 0.0, 1, 3.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C18", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 5, "g": [5, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 5, "g": [5, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 5, "g": [5, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 5, "g": [5, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 5, "g": [5, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C19", "deg": "MBA", "inv": false, "by": {"2026-08-25": {"raw": 1.0, "g": [0, 0.0, 1, 0.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 1.0, "g": [0, 0.0, 1, 0.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 1.0, "g": [0, 0.0, 1, 0.0, 0], "recent": 1, "pub": 1, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 4.253, "g": [0, 0.753, 2, 1.5, 0], "recent": 2, "pub": 2, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 4.253, "g": [0, 0.753, 2, 1.5, 0], "recent": 2, "pub": 2, "tests": 0, "ci": 0, "lic": 0, "readme": 1, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C20", "deg": "MBA", "inv": false, "by": {"2026-08-25": {"raw": 1.806, "g": [1.806, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 1.817, "g": [1.817, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 1.825, "g": [1.825, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 1.833, "g": [1.833, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 1.844, "g": [1.844, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C21", "deg": "MBA", "inv": false, "by": {"2026-08-25": {"raw": 1.121, "g": [1.121, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 1.132, "g": [1.132, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 1.14, "g": [1.14, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 1.149, "g": [1.149, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 1.159, "g": [1.159, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C22", "deg": "MBA", "inv": false, "by": {"2026-08-25": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C23", "deg": "M.Tech", "inv": false, "by": {"2026-08-25": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}, {"id": "C24", "deg": "MBA", "inv": false, "by": {"2026-08-25": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-08-29": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-01": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-04": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}, "2026-09-08": {"raw": 0, "g": [0, 0, 0, 0, 0], "recent": 0, "pub": 0, "tests": 0, "ci": 0, "lic": 0, "readme": 0, "stars": 0, "fol": 0, "pr": 0, "prm": 0}}}]};
+const GROUPS = D.groups, DATES = D.dates;
+const GVARS = ["--s1","--s2","--s3","--s4","--s5"];
+const tip = document.getElementById("tip");
+function showTip(e, html){ tip.innerHTML = html; tip.style.display = "block"; moveTip(e); }
+function moveTip(e){ const w = tip.offsetWidth, h = tip.offsetHeight; let x = e.clientX + 14, y = e.clientY + 14; if (x + w > innerWidth - 8) x = e.clientX - w - 14; if (y + h > innerHeight - 8) y = e.clientY - h - 14; tip.style.left = x + "px"; tip.style.top = y + "px"; }
+function hideTip(){ tip.style.display = "none"; }
+const fmt = v => v.toFixed(2);
+const nice = d => new Date(d + "T00:00:00").toLocaleDateString("en-GB", {day:"numeric", month:"short", year:"numeric"});
+const list = a => a.length <= 1 ? a.join("") : a.slice(0,-1).join(", ") + " and " + a[a.length-1];
+const MAX = 28;
+let cur = DATES[DATES.length - 1];
+
+function rowsFor(date){
+  const r = D.cands.map(c => ({id:c.id, deg:c.deg, inv:c.inv, ...c.by[date], trend:DATES.map(d => c.by[d].raw)}));
+  r.sort((a,b) => b.raw - a.raw); r.forEach((x,i) => x.rank = i + 1); return r;
+}
+
+function analyse(R){
+  const inv = R.filter(r => r.inv), minInv = Math.min(...inv.map(r => r.raw));
+  const top4 = R.slice(0,4), overlap = top4.filter(r => r.inv).length;
+  const above = R.filter(r => r.raw >= minInv && !r.inv);
+  const out = [];
+  out.push({cls: overlap === 4 ? "good" : "bad", verdict: overlap === 4 ? "Fits" : "Doesn't fit", title:"Top 4 by score",
+    body:`The top 4 are ${list(top4.map(r=>r.id))}. ${overlap} of them ${overlap===1?"was":"were"} invited. ${above.filter(r=>r.rank<=4).map(r=>`${r.id} (${fmt(r.raw)})`).join(" and ")} outscored invitees ${list(inv.filter(r=>r.rank>4).map(r=>`${r.id} (${fmt(r.raw)})`))} and ${above.filter(r=>r.rank<=4).length>1?"weren't":"wasn't"} invited.`});
+  out.push({cls: above.length ? "bad" : "good", verdict: above.length ? "Doesn't fit" : "Fits", title:"A score cutoff",
+    body: above.length ? `Any cutoff low enough to include all four invitees (${fmt(minInv)} or lower) also lets in ${list(above.map(r=>r.id))}, none of whom were invited.` : `A cutoff at ${fmt(minInv)} separates the invitees exactly.`});
+  // rounding ties
+  const groups = {}; R.forEach(r => (groups[Math.round(r.raw)] ||= []).push(r));
+  const mixed = Object.entries(groups).filter(([k,g]) => g.some(r=>r.inv) && g.some(r=>!r.inv));
+  let wrong = 0; const bits = mixed.map(([k,g]) => { const best = g[0]; const i = g.filter(r=>r.inv); if (!best.inv) wrong++; return `At ${k}, ${i.map(r=>`${r.id} (${fmt(r.raw)})`).join(", ")} ${i.length>1?"were":"was"} invited over ${g.filter(r=>!r.inv).map(r=>`${r.id} (${fmt(r.raw)})`).join(", ")}.`; });
+  out.push({cls: wrong ? "bad" : "good", verdict: mixed.length === 0 ? "No ties" : (wrong ? "Doesn't fit" : "Fits"), title:"Ties broken by the unrounded score",
+    body: mixed.length ? `The script rounds scores, so I checked the decimals behind ties that split invited and not invited. ${bits.join(" ")} ${wrong ? `In ${wrong} of ${mixed.length} case${mixed.length>1?"s":""} the invitee did not have the higher exact score.` : "The invitee had the higher exact score each time."}` : "No rounded score is shared by an invitee and a non-invitee on this date."});
+  const band = R.filter(r => r.raw >= minInv), anyPR = band.filter(r => r.pr > 0), merged = band.filter(r => r.prm > 0);
+  out.push({cls:"bad", verdict:"Withdrawn", title:"Unmerged-PR penalty (my first version)",
+    body:`Of the ${band.length} candidates scoring ${fmt(minInv)} or higher, ${anyPR.length ? anyPR.length + " had a PR to someone else's repo" : "none had a PR to someone else's repo"}${merged.length ? ` and ${merged.length} had one merged` : ""} by this date. There is ${anyPR.length ? "too little" : "nothing"} in the data for this rule to act on.`});
+  const tracks = ["M.Tech","MBA","B.Tech"].map(t => { const g = R.filter(r => r.deg === t); return {t, g, inv: g.filter(r=>r.inv)}; });
+  const topHit = tracks.filter(x => x.inv.length && x.g[0].inv);
+  const bt = tracks.find(x => x.t === "B.Tech"), btRanks = bt.inv.map(r => bt.g.indexOf(r) + 1);
+  const btOk = btRanks.every(k => k <= bt.inv.length);
+  out.push({cls: btOk && topHit.length === 3 ? "good" : "partial", verdict: btOk && topHit.length === 3 ? "Fits" : "Partly fits", title:"Seats per degree track, filled by score",
+    body:`Invites went ${tracks.map(x=>`${x.inv.length} ${x.t}`).join(", ")}. ${topHit.map(x=>`The top ${x.t} (${x.g[0].id})`).join(" and ")} ${topHit.length>1?"were":"was"} invited. The B.Tech invitees rank ${list(btRanks.map(k=>k+ordinal(k)))} among B.Techs${btOk ? ", so score within track explains them." : `, behind ${list(bt.g.slice(0, Math.max(...btRanks)).filter(r=>!r.inv).map(r=>r.id))}, so the score didn't pick the B.Tech seats.`}`});
+  const pred = r => r.raw >= minInv && r.stars >= 1, hits = R.filter(r => pred(r) === r.inv).length, miss = R.filter(r => pred(r) !== r.inv).map(r=>r.id);
+  out.push({cls:"partial", verdict:"Overfit", title:`Score of ${fmt(minInv)}+ and at least one star`,
+    body:`This combination gets ${hits} of 24 right${miss.length ? `, missing ${list(miss)}` : ""}. But I found it by searching thousands of combinations against just 4 invitees, so it's probably a coincidence, not a rule. Stars are also today's counts, not the date's.`});
+  return {inv, minInv, top4, overlap, above, tests: out};
+}
+function ordinal(n){ return ["th","st","nd","rd"][(n%100>10&&n%100<14)?0:Math.min(n%10,4)%4] || "th"; }
+
+const rc = document.getElementById("rankChart"), sc = document.getElementById("stackChart"), tb = document.querySelector("#tbl tbody");
+let R = [];
+function render(){
+  R = rowsFor(cur); const A = analyse(R);
+  document.querySelectorAll("#dateBtns button").forEach(b => b.setAttribute("aria-pressed", b.dataset.d === cur));
+  const TR = tree(R);
+  document.getElementById("kAcc").textContent = `${TR.correct}/24`;
+  document.getElementById("kGate").textContent = `${TR.gate.length} of 24`;
+  document.getElementById("kRanks").textContent = A.inv.map(r => "#" + r.rank).join(" ");
+  document.getElementById("rankSub").textContent = `Exact (unrounded) score as of ${nice(cur)}. The vertical line marks the lowest invited score (${fmt(A.minInv)}).`;
+  const cutPct = A.minInv / MAX * 100;
+  rc.innerHTML = "";
+  R.forEach(d => {
+    const row = document.createElement("div"); row.className = "rank-row" + (d.inv ? " inv" : "");
+    row.innerHTML = `<span class="id">${d.id}</span><span class="dg">${d.deg}</span><span class="track"><span class="bar" style="width:${Math.max(d.raw/MAX*100,0.4)}%"></span><span class="cut" style="left:${cutPct}%"></span></span><span class="val">${fmt(d.raw)}</span>`;
+    row.addEventListener("mousemove", e => showTip(e, `<b>${d.id}</b> · ${d.deg}<br>Score ${fmt(d.raw)} (rank #${d.rank})<br>${d.inv ? "Invited" : "Not invited"}`));
+    row.addEventListener("mouseleave", hideTip); rc.appendChild(row);
+  });
+  drawTree(TR);
+  sc.innerHTML = "";
+  R.slice(0,10).forEach(d => {
+    const row = document.createElement("div"); row.className = "stack-row";
+    const segs = d.g.map((v,i) => v <= 0.005 ? "" : `<span data-g="${i}" style="width:${v/MAX*100}%;background:var(${GVARS[i]})"></span>`).join("");
+    row.innerHTML = `<span class="id" style="font-size:13px;${d.inv ? "font-weight:650" : ""}">${d.id}</span><div class="stack">${segs}</div><span class="val" style="font-size:13px;text-align:right;color:var(--text-secondary)">${fmt(d.raw)}</span>`;
+    row.querySelectorAll(".stack span").forEach(s => { const i = +s.dataset.g;
+      s.addEventListener("mousemove", e => showTip(e, `<b>${d.id}</b> · ${d.inv ? "Invited" : "Not invited"}<br>${GROUPS[i]}: ${fmt(d.g[i])}<br>Total ${fmt(d.raw)}`));
+      s.addEventListener("mouseleave", hideTip); });
+    sc.appendChild(row);
+  });
+  renderTable();
+}
+function spark(a){ const w=64,h=16,mn=Math.min(...a),mx=Math.max(...a),r=(mx-mn)||1; const pts=a.map((v,i)=>`${(i/(a.length-1)*(w-4)+2).toFixed(1)},${(h-2-(v-mn)/r*(h-4)).toFixed(1)}`).join(" "); return `<svg width="${w}" height="${h}" role="img" aria-label="${a.map(fmt).join(', ')}"><polyline points="${pts}" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`; }
+let sortK = "rank", asc = true;
+function renderTable(){
+  const rows = [...R].sort((a,b) => { const x=a[sortK], y=b[sortK]; const c = typeof x === "string" ? x.localeCompare(y) : x - y; return asc ? c : -c; });
+  tb.innerHTML = rows.map(d => `<tr class="${d.inv ? "inv" : ""}"><td><span class="dot"></span>${d.id}</td><td>${d.deg}</td><td>${fmt(d.raw)}</td><td>${d.rank}</td><td>${d.recent}</td><td>${d.tests}</td><td>${d.ci}</td><td>${d.lic}</td><td>${d.stars}</td><td>${d.fol}</td><td>${d.pr}</td><td>${d.prm}</td><td>${spark(d.trend)}</td></tr>`).join("");
+}
+document.querySelectorAll("#tbl th[data-k]").forEach(th => th.addEventListener("click", () => { const k = th.dataset.k; if (sortK === k) asc = !asc; else { sortK = k; asc = !["raw","recent","tests","ci","lic","stars","fol","pr","prm"].includes(k); } renderTable(); }));
+const db = document.getElementById("dateBtns");
+DATES.forEach(d => { const b = document.createElement("button"); b.type = "button"; b.dataset.d = d; b.textContent = new Date(d+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"}); b.addEventListener("click", () => { cur = d; render(); }); db.appendChild(b); });
+render();
+
+function tree(R){
+  const pred = r => r.raw >= 18.5 && (r.stars >= 1 || r.lic >= 3);
+  const gate = R.filter(r => r.raw >= 18.5), below = R.filter(r => r.raw < 18.5);
+  const star = gate.filter(r => r.stars >= 1), nostar = gate.filter(r => r.stars < 1);
+  const lic = nostar.filter(r => r.lic >= 3), nolic = nostar.filter(r => r.lic < 3);
+  return {pred, gate, below, star, nostar, lic, nolic, correct: R.filter(r => pred(r) === r.inv).length};
+}
+function drawTree(T){
+  document.getElementById("treeSub").textContent = `As of ${nice(cur)}: ${T.correct} of 24 decisions match. Each box shows who reaches it; invited candidates are in bold.`;
+  const svg = document.getElementById("tree");
+  const names = a => a.map(r => r.inv ? `<tspan font-weight="700">${r.id}</tspan>` : r.id).join(", ");
+  const cnt = a => `${a.length} candidate${a.length===1?"":"s"} · ${a.filter(r=>r.inv).length} invited`;
+  const q = (x,y,w,t1,t2) => `<rect x="${x}" y="${y}" width="${w}" height="54" rx="8" fill="var(--surface-0)" stroke="var(--border)"/><text x="${x+w/2}" y="${y+23}" text-anchor="middle" font-weight="650">${t1}</text><text class="small" x="${x+w/2}" y="${y+42}" text-anchor="middle">${t2}</text>`;
+  const leaf = (x,y,w,inv,a,label) => `<rect x="${x}" y="${y}" width="${w}" height="66" rx="8" fill="${inv ? "var(--inv)" : "var(--notinv)"}" opacity="${inv ? .14 : .35}"/><rect x="${x}" y="${y}" width="${w}" height="66" rx="8" fill="none" stroke="${inv ? "var(--inv)" : "var(--border)"}"/><text x="${x+w/2}" y="${y+21}" text-anchor="middle" font-weight="700">${label}</text><text class="small" x="${x+w/2}" y="${y+39}" text-anchor="middle">${cnt(a)}</text><text class="small" x="${x+w/2}" y="${y+56}" text-anchor="middle">${a.length > 6 ? a.slice(0,5).map(r=>r.id).join(", ") + ` +${a.length-5} more` : names(a)}</text>`;
+  const edge = (x1,y1,x2,y2,lab) => `<path d="M${x1},${y1} C${x1},${(y1+y2)/2} ${x2},${(y1+y2)/2} ${x2},${y2}" fill="none" stroke="var(--text-muted)" stroke-width="1.5"/><text class="small" x="${(x1+x2)/2 + (x2>x1?8:-8)}" y="${(y1+y2)/2 - 2}" text-anchor="${x2>x1?"start":"end"}" font-weight="650">${lab}</text>`;
+  let h = "";
+  h += q(300,10,300,"GitHub score ≥ 18.5?","all 24 candidates");
+  h += edge(390,64,130,120,"No"); h += edge(510,64,560,120,"Yes");
+  h += leaf(20,120,220,false,T.below,"Not invited");
+  h += q(420,120,280,"≥ 1 star on a recent repo?",`${T.gate.length} passed the screen`);
+  h += edge(500,174,420,230,"Yes"); h += edge(620,174,720,230,"No");
+  h += leaf(300,230,240,true,T.star,"Invite");
+  h += q(590,230,290,"Licence on ≥ 3 recent repos?",`${T.nostar.length} without a star`);
+  h += edge(680,284,600,300,""); 
+  svg.setAttribute("viewBox","0 0 900 415");
+  h = h.replace(edge(680,284,600,300,""),"");
+  h += edge(680,284,610,340,"Yes"); h += edge(790,284,800,340,"No");
+  h += leaf(500,340,210,true,T.lic,"Invite");
+  h += leaf(725,340,170,false,T.nolic,"Not invited");
+  svg.innerHTML = h;
+  const tb2 = document.querySelector("#trace tbody");
+  tb2.innerHTML = T.gate.map(r => {
+    const path = r.stars >= 1 ? `Score ✓ → ${r.stars} star${r.stars>1?"s":""} ✓` : `Score ✓ → no stars → ${r.lic} licensed ${r.lic>=3?"✓":"✗"}`;
+    const p = T.pred(r);
+    return `<tr class="${r.inv?"inv":""}"><td><span class="dot"></span>${r.id}</td><td>${r.deg}</td><td>${fmt(r.raw)}</td><td>${r.stars}</td><td>${r.lic}</td><td>${path}</td><td class="${p?"yes":"no"}">${p?"Invite":"No"}</td><td class="${p===r.inv?"ok":"bad"}">${r.inv?"Invited":"Not invited"} ${p===r.inv?"✓":"✗"}</td></tr>`;
+  }).join("");
+}
+
+// theme
+document.getElementById("themeBtn").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  document.documentElement.dataset.theme = cur === "dark" ? "light" : "dark";
+});
+</script>
 </body>
 </html>
